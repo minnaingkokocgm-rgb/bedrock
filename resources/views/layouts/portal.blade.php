@@ -18,6 +18,7 @@
                 @auth
                     <a href="{{ route('review.submissions.index') }}" class="text-stone-600 hover:text-stone-900">Review</a>
                     <a href="{{ route('admin.ai.edit') }}" class="text-stone-600 hover:text-stone-900">AI settings</a>
+                    <a href="{{ route('admin.bedrock.ping') }}" class="text-stone-600 hover:text-stone-900">Bedrock ping</a>
                     <form method="POST" action="{{ route('logout') }}">
                         @csrf
                         <button type="submit" class="text-stone-600 hover:text-stone-900">Log out</button>

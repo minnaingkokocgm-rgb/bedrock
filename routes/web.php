@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AiSettingsController;
+use App\Http\Controllers\Admin\BedrockPingController;
 use App\Http\Controllers\Auth\SessionController;
 use App\Http\Controllers\Review\SubmissionController as ReviewSubmissionController;
 use App\Http\Controllers\SubmissionController;
@@ -31,4 +32,5 @@ Route::middleware('auth')->prefix('review')->name('review.')->group(function () 
 Route::middleware('auth')->prefix('admin')->name('admin.')->group(function () {
     Route::get('/ai', [AiSettingsController::class, 'edit'])->name('ai.edit');
     Route::put('/ai', [AiSettingsController::class, 'update'])->name('ai.update');
+    Route::get('/bedrock-ping', BedrockPingController::class)->name('bedrock.ping');
 });
