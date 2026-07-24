@@ -1,0 +1,23 @@
+Quarterly Project Status Report
+-------------------------------
+
+Project: Submission Portal Launch
+Period: Q3 2026
+Owner: Ada Lovelace
+
+Summary:
+The document submission portal is live for internal testing.
+Reviewers can approve or reject uploads, and Bedrock provides
+advisory recommendations only.
+
+Completed:
+- File upload for documents, images, and videos
+- Reviewer login and decision workflow
+- AI advice job with prompt/rule snapshots
+
+Next steps:
+- Expand text extraction beyond txt/csv/pdf
+- Improve prompt quality using stored human decisions
+
+Risks:
+- AI advice quality may vary until rules are tuned.
