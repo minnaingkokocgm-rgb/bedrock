@@ -55,15 +55,16 @@ class AnalyzeSubmissionAction
             $typeRules = FileTypeRule::forType($submission->type)?->rules
                 ?? 'No specific rules configured for this file type.';
 
-            $s3Block = $submission->usesS3()
-                ? $this->contentMapper->s3ContentBlock($submission)
-                : null;
+            $fileSource = $this->contentMapper->supportsS3Location($modelId) ? 's3Location' : 'bytes';
+            $fileBlock = $this->contentMapper->contentBlock($submission, $modelId);
 
-            if ($s3Block !== null) {
-                Log::info('submission.analyze.mode_s3_converse', [
+            if ($fileBlock !== null) {
+                Log::info('submission.analyze.mode_file_converse', [
                     'submission_id' => $submission->id,
                     's3_uri' => $submission->s3Uri(),
-                    's3_block_keys' => array_keys($s3Block),
+                    'file_source' => $fileSource,
+                    'file_block_keys' => array_keys($fileBlock),
+                    'model_id' => $modelId,
                 ]);
 
                 $textExtraction = $this->extractor->extract($submission);
@@ -80,7 +81,7 @@ class AnalyzeSubmissionAction
 
                 Log::info('submission.analyze.extraction_result', [
                     'submission_id' => $submission->id,
-                    'mode' => 's3',
+                    'mode' => $fileSource,
                     'extraction_status' => $textExtraction['status']->value,
                     'has_text_body' => $hasTextBody,
                     'extraction_error' => $textExtraction['error'],
@@ -98,6 +99,7 @@ class AnalyzeSubmissionAction
                 Log::info('submission.analyze.bedrock_request', [
                     'submission_id' => $submission->id,
                     'mode' => 'converseContent',
+                    'file_source' => $fileSource,
                     'model_id' => $modelId,
                 ]);
 
@@ -109,18 +111,20 @@ class AnalyzeSubmissionAction
                             includeContentBody: $hasTextBody,
                             requireAttachedFileReview: true,
                         )],
-                        $s3Block,
+                        $fileBlock,
                     ],
                     systemPrompt: $systemPrompt,
                 );
             } else {
                 if ($submission->usesS3()) {
-                    Log::warning('submission.analyze.s3_block_unavailable', [
+                    Log::warning('submission.analyze.file_block_unavailable', [
                         'submission_id' => $submission->id,
                         's3_uri' => $submission->s3Uri(),
                         'type' => $submission->type->value,
                         'original_filename' => $submission->original_filename,
-                        'hint' => 'Falling back to text-only extraction; extension may be unsupported for Converse s3Location.',
+                        'file_source' => $fileSource,
+                        'model_id' => $modelId,
+                        'hint' => 'Falling back to text-only extraction; extension may be unsupported for Converse file attachment.',
                     ]);
                 }
 
@@ -226,7 +230,7 @@ Important:
 MESSAGE;
 
         if ($requireAttachedFileReview) {
-            $message .= "An original file is also attached from Amazon S3. Use it together with any extracted text below.\n\n";
+            $message .= "An original file is also attached. Use it together with any extracted text below.\n\n";
         }
 
         if ($includeContentBody) {

@@ -94,7 +94,7 @@ it('shows ai advice on the review page', function () {
         ->assertSee('Looks incomplete.');
 });
 
-it('passes an s3 location to bedrock for s3-backed submissions', function () {
+it('passes an s3 location to bedrock for nova models', function () {
     Storage::fake('s3');
     Storage::disk('s3')->put(
         'submissions/employee-onboarding-checklist.txt',
@@ -104,6 +104,7 @@ it('passes an s3 location to bedrock for s3-backed submissions', function () {
     config([
         'filesystems.disks.s3.bucket' => 'portal-uploads',
         'submissions.disk' => 's3',
+        'services.bedrock.model_id' => 'global.amazon.nova-2-lite-v1:0',
     ]);
 
     $submission = Submission::factory()->create([
@@ -134,6 +135,46 @@ it('passes an s3 location to bedrock for s3-backed submissions', function () {
         ->and($advice->extracted_content)->toContain('Employee Onboarding Checklist')
         ->and($advice->ai_verdict)->toBe(AiVerdict::Accept)
         ->and($submission->fresh()->status)->toBe(SubmissionStatus::Pending);
+});
+
+it('passes file bytes to bedrock for non-nova models', function () {
+    Storage::fake('s3');
+    $docxBytes = 'PK fake-docx-bytes';
+    Storage::disk('s3')->put('submissions/policy.docx', $docxBytes);
+
+    config([
+        'filesystems.disks.s3.bucket' => 'portal-uploads',
+        'submissions.disk' => 's3',
+        'services.bedrock.model_id' => 'global.anthropic.claude-sonnet-5',
+    ]);
+
+    $submission = Submission::factory()->create([
+        'original_filename' => 'policy.docx',
+        'disk_path' => 'submissions/policy.docx',
+        'disk' => 's3',
+        'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'status' => SubmissionStatus::Pending,
+    ]);
+
+    $this->mock(BedrockService::class, function ($mock) use ($docxBytes) {
+        $mock->shouldReceive('converseContent')
+            ->once()
+            ->withArgs(function (array $content) use ($docxBytes): bool {
+                $document = $content[1]['document'] ?? null;
+
+                return ($document['format'] ?? null) === 'docx'
+                    && ($document['source']['bytes'] ?? null) === $docxBytes
+                    && ! isset($document['source']['s3Location']);
+            })
+            ->andReturn('{"verdict":"accept","reason":"Policy document looks fine."}');
+    });
+
+    $advice = app(AnalyzeSubmissionAction::class)->handle($submission);
+
+    expect($advice->status)->toBe(AdviceStatus::Completed)
+        ->and($advice->model_id)->toBe('global.anthropic.claude-sonnet-5')
+        ->and($advice->extraction_status->value)->toBe('s3_referenced')
+        ->and($advice->ai_verdict)->toBe(AiVerdict::Accept);
 });
 it('stores new uploads on s3 when configured', function () {
     Queue::fake();
