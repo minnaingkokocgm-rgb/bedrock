@@ -11,11 +11,12 @@ use App\Models\Submission;
 use App\Models\User;
 use App\Services\Bedrock\BedrockService;
 use Database\Seeders\AiSettingsSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 beforeEach(function () {
     $this->seed(AiSettingsSeeder::class);
@@ -155,4 +156,29 @@ it('stores new uploads on s3 when configured', function () {
 
     expect($submission->disk)->toBe('s3');
     Storage::disk('s3')->assertExists($submission->disk_path);
+});
+
+it('records extraction failure when local stored file is missing', function () {
+    Storage::fake('local');
+
+    $submission = Submission::factory()->create([
+        'original_filename' => 'missing.txt',
+        'disk_path' => 'submissions/does-not-exist.txt',
+        'disk' => 'local',
+        'mime_type' => 'text/plain',
+        'status' => SubmissionStatus::Pending,
+    ]);
+
+    $this->mock(BedrockService::class, function ($mock) {
+        $mock->shouldReceive('converse')
+            ->once()
+            ->andReturn('{"verdict":"reject","reason":"No extracted text available — stored file was not found."}');
+    });
+
+    $advice = app(AnalyzeSubmissionAction::class)->handle($submission);
+
+    expect($advice->status)->toBe(AdviceStatus::Completed)
+        ->and($advice->extraction_status->value)->toBe('failed')
+        ->and($advice->extraction_error)->toBe('Stored file was not found.')
+        ->and($advice->ai_verdict)->toBe(AiVerdict::Reject);
 });

@@ -12,6 +12,7 @@ use App\Models\SubmissionAiAdvice;
 use App\Services\Bedrock\BedrockService;
 use App\Services\BedrockContentMapper;
 use App\Services\ContentExtractor;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class AnalyzeSubmissionAction
@@ -26,12 +27,26 @@ class AnalyzeSubmissionAction
 
     public function handle(Submission $submission): SubmissionAiAdvice
     {
+        $modelId = (string) config('services.bedrock.model_id');
+
+        Log::info('submission.analyze.start', [
+            'submission_id' => $submission->id,
+            'disk' => $submission->disk,
+            'disk_path' => $submission->disk_path,
+            'type' => $submission->type->value,
+            'original_filename' => $submission->original_filename,
+            'model_id' => $modelId,
+            'uses_s3' => $submission->usesS3(),
+            's3_uri' => $submission->s3Uri(),
+            'bedrock_region' => config('services.bedrock.region'),
+        ]);
+
         $advice = SubmissionAiAdvice::query()->create([
             'submission_id' => $submission->id,
             'extraction_status' => ExtractionStatus::Unsupported,
             'system_prompt_snapshot' => '',
             'type_rules_snapshot' => '',
-            'model_id' => (string) config('services.bedrock.model_id'),
+            'model_id' => $modelId,
             'status' => AdviceStatus::Pending,
         ]);
 
@@ -45,6 +60,12 @@ class AnalyzeSubmissionAction
                 : null;
 
             if ($s3Block !== null) {
+                Log::info('submission.analyze.mode_s3_converse', [
+                    'submission_id' => $submission->id,
+                    's3_uri' => $submission->s3Uri(),
+                    's3_block_keys' => array_keys($s3Block),
+                ]);
+
                 $textExtraction = $this->extractor->extract($submission);
                 $hasTextBody = $textExtraction['status'] === ExtractionStatus::Extracted
                     && filled($textExtraction['content']);
@@ -57,6 +78,14 @@ class AnalyzeSubmissionAction
                     'error' => $textExtraction['error'],
                 ];
 
+                Log::info('submission.analyze.extraction_result', [
+                    'submission_id' => $submission->id,
+                    'mode' => 's3',
+                    'extraction_status' => $textExtraction['status']->value,
+                    'has_text_body' => $hasTextBody,
+                    'extraction_error' => $textExtraction['error'],
+                ]);
+
                 $advice->fill([
                     'extracted_content' => $extraction['content'],
                     'extraction_status' => $extraction['status'],
@@ -65,6 +94,12 @@ class AnalyzeSubmissionAction
                     'type_rules_snapshot' => $typeRules,
                 ]);
                 $advice->save();
+
+                Log::info('submission.analyze.bedrock_request', [
+                    'submission_id' => $submission->id,
+                    'mode' => 'converseContent',
+                    'model_id' => $modelId,
+                ]);
 
                 $raw = $this->bedrock->converseContent(
                     [
@@ -79,7 +114,25 @@ class AnalyzeSubmissionAction
                     systemPrompt: $systemPrompt,
                 );
             } else {
+                if ($submission->usesS3()) {
+                    Log::warning('submission.analyze.s3_block_unavailable', [
+                        'submission_id' => $submission->id,
+                        's3_uri' => $submission->s3Uri(),
+                        'type' => $submission->type->value,
+                        'original_filename' => $submission->original_filename,
+                        'hint' => 'Falling back to text-only extraction; extension may be unsupported for Converse s3Location.',
+                    ]);
+                }
+
                 $extraction = $this->extractor->extract($submission);
+
+                Log::info('submission.analyze.extraction_result', [
+                    'submission_id' => $submission->id,
+                    'mode' => 'local_or_text',
+                    'extraction_status' => $extraction['status']->value,
+                    'extraction_error' => $extraction['error'],
+                    'content_length' => is_string($extraction['content']) ? mb_strlen($extraction['content']) : 0,
+                ]);
 
                 $advice->fill([
                     'extracted_content' => $extraction['content'],
@@ -89,6 +142,12 @@ class AnalyzeSubmissionAction
                     'type_rules_snapshot' => $typeRules,
                 ]);
                 $advice->save();
+
+                Log::info('submission.analyze.bedrock_request', [
+                    'submission_id' => $submission->id,
+                    'mode' => 'converse',
+                    'model_id' => $modelId,
+                ]);
 
                 $raw = $this->bedrock->converse(
                     $this->buildPromptText($submission, $extraction, includeContentBody: true),
@@ -105,7 +164,23 @@ class AnalyzeSubmissionAction
                 'status' => AdviceStatus::Completed,
                 'analyzed_at' => now(),
             ]);
+
+            Log::info('submission.analyze.completed', [
+                'submission_id' => $submission->id,
+                'advice_id' => $advice->id,
+                'verdict' => $verdict->value,
+                'extraction_status' => $advice->extraction_status?->value,
+                'extraction_error' => $advice->extraction_error,
+            ]);
         } catch (Throwable $e) {
+            Log::error('submission.analyze.failed', [
+                'submission_id' => $submission->id,
+                'advice_id' => $advice->id,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+                'previous' => $e->getPrevious()?->getMessage(),
+            ]);
+
             $advice->update([
                 'status' => AdviceStatus::Failed,
                 'ai_reason' => $e->getMessage(),
