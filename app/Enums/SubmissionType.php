@@ -75,6 +75,12 @@ enum SubmissionType: string
             str_starts_with($mime, 'image/') => self::Image,
             str_starts_with($mime, 'video/') => self::Video,
             in_array($mime, [
+                'video/x-ms-wmv',
+                'audio/x-ms-wmv',
+                'video/x-ms-asf',
+                'application/vnd.ms-asf',
+            ], true) => self::Video,
+            in_array($mime, [
                 'application/pdf',
                 'application/msword',
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

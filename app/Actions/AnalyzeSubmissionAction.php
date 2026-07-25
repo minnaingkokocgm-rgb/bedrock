@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Enums\AdviceStatus;
 use App\Enums\AiVerdict;
 use App\Enums\ExtractionStatus;
+use App\Enums\SubmissionType;
 use App\Models\AiSetting;
 use App\Models\FileTypeRule;
 use App\Models\Submission;
@@ -17,8 +18,6 @@ use Throwable;
 
 class AnalyzeSubmissionAction
 {
-    private const CONTENT_LIMIT = 40_000;
-
     public function __construct(
         private ContentExtractor $extractor,
         private BedrockService $bedrock,
@@ -159,12 +158,12 @@ class AnalyzeSubmissionAction
                 );
             }
 
-            [$verdict, $reason] = $this->parseVerdict($raw);
+            [$verdict, $reason, $storedRaw] = $this->resolveVerdict($raw);
 
             $advice->update([
                 'ai_verdict' => $verdict,
                 'ai_reason' => $reason,
-                'ai_raw_response' => $raw,
+                'ai_raw_response' => $storedRaw,
                 'status' => AdviceStatus::Completed,
                 'analyzed_at' => now(),
             ]);
@@ -208,6 +207,12 @@ class AnalyzeSubmissionAction
         $typeRules = FileTypeRule::forType($submission->type)?->rules
             ?? 'No specific rules configured for this file type.';
 
+        $evidenceHint = match ($submission->type) {
+            SubmissionType::Document => 'In your reason, quote a short snippet from the document (heading, sentence, or cell value).',
+            SubmissionType::Image => 'In your reason, briefly describe what you see in the image (subject, scene, or any readable text).',
+            SubmissionType::Video => 'In your reason, briefly describe key visual scenes or on-screen text. Do not claim you heard audio unless available.',
+        };
+
         $message = <<<MESSAGE
 File type rules for {$submission->type->value}:
 {$typeRules}
@@ -222,21 +227,26 @@ Submission metadata:
 - Storage: {$submission->disk}
 
 Important:
-- Base your verdict on the file content itself.
-- Do NOT reject only because the file is small.
-- If content is present (even one short word), evaluate that content.
-- In your reason, quote a short snippet of the actual file content you used.
+- Base your verdict on the file content itself (attached file and/or extracted text), not filename alone.
+- Do NOT reject only because the file is small or short.
+- If content is present (even brief), evaluate that content.
+- {$evidenceHint}
 
 MESSAGE;
 
         if ($requireAttachedFileReview) {
-            $message .= "An original file is also attached. Use it together with any extracted text below.\n\n";
+            $message .= match ($submission->type) {
+                SubmissionType::Document => "An original document is attached. Review it together with any extracted text below.\n\n",
+                SubmissionType::Image => "An original image is attached. Visually inspect it; do not rely on metadata alone.\n\n",
+                SubmissionType::Video => "An original video is attached. Visually inspect the frames/scenes; do not rely on metadata alone.\n\n",
+            };
         }
 
         if ($includeContentBody) {
             $content = $extraction['content'] ?? '';
-            if (mb_strlen($content) > self::CONTENT_LIMIT) {
-                $content = mb_substr($content, 0, self::CONTENT_LIMIT)."\n...[truncated]";
+            $contentLimit = (int) config('services.bedrock.content_char_limit', 500_000);
+            if ($contentLimit > 0 && mb_strlen($content) > $contentLimit) {
+                $content = mb_substr($content, 0, $contentLimit)."\n...[truncated]";
             }
 
             $contentSection = match ($extraction['status']) {
@@ -254,26 +264,123 @@ MESSAGE;
             };
         }
 
-        return $message.'Return ONLY JSON: {"verdict":"accept"|"reject"|"inconclusive","reason":"..."}';
+        return $message.<<<'TAIL'
+CRITICAL OUTPUT FORMAT:
+- Reply with ONLY one JSON object. No markdown. No code fences. No prose before or after.
+- Put any file description inside the "reason" field (1-3 short sentences max).
+- Exact shape: {"verdict":"accept"|"reject"|"inconclusive","reason":"..."}
+TAIL;
+    }
+
+    /**
+     * @return array{0: AiVerdict, 1: string, 2: string}
+     */
+    private function resolveVerdict(string $raw): array
+    {
+        $decoded = $this->decodeVerdictJson($raw);
+
+        if ($decoded !== null) {
+            return [...$this->verdictFromDecoded($decoded), $raw];
+        }
+
+        Log::warning('submission.analyze.json_repair_attempt', [
+            'raw_length' => mb_strlen($raw),
+            'raw_preview' => mb_substr($raw, 0, 240),
+        ]);
+
+        try {
+            $repaired = $this->bedrock->converse(
+                $this->buildJsonRepairPrompt($raw),
+                inferenceConfig: [
+                    'maxTokens' => 512,
+                    'temperature' => 0.0,
+                ],
+                systemPrompt: 'You convert content reviews into JSON. Reply with ONLY valid JSON. No markdown.',
+            );
+
+            $decoded = $this->decodeVerdictJson($repaired);
+
+            if ($decoded !== null) {
+                Log::info('submission.analyze.json_repair_success', [
+                    'repaired_length' => mb_strlen($repaired),
+                ]);
+
+                return [...$this->verdictFromDecoded($decoded), $raw."\n\n--- JSON repair ---\n\n".$repaired];
+            }
+        } catch (Throwable $e) {
+            Log::warning('submission.analyze.json_repair_failed', [
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+        }
+
+        return [AiVerdict::Inconclusive, 'Model response was not valid JSON.', $raw];
+    }
+
+    private function buildJsonRepairPrompt(string $raw): string
+    {
+        return <<<PROMPT
+Convert the following content review into ONLY this JSON object (no markdown, no extra text):
+{"verdict":"accept"|"reject"|"inconclusive","reason":"1-3 concise sentences"}
+
+Verdict guide:
+- accept: review describes real, usable, non-abusive content
+- reject: empty, corrupt, spam, abusive, or clearly deceptive content
+- inconclusive: review is too ambiguous to decide
+
+Review text:
+{$raw}
+PROMPT;
+    }
+
+    /**
+     * @return array{verdict: string, reason: string}|null
+     */
+    private function decodeVerdictJson(string $raw): ?array
+    {
+        $trimmed = trim($raw);
+
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/is', $trimmed, $fenced) === 1) {
+            $trimmed = trim($fenced[1]);
+        }
+
+        $decoded = json_decode($trimmed, true);
+        if ($this->isVerdictPayload($decoded)) {
+            /** @var array{verdict: mixed, reason?: mixed} $decoded */
+            return $decoded;
+        }
+
+        if (preg_match('/\{[^{}]*"verdict"\s*:\s*"[^"]+"[^{}]*\}/s', $trimmed, $matches) === 1) {
+            $decoded = json_decode($matches[0], true);
+            if ($this->isVerdictPayload($decoded)) {
+                /** @var array{verdict: mixed, reason?: mixed} $decoded */
+                return $decoded;
+            }
+        }
+
+        // Fallback for reasons that contain nested braces/quotes noise: take outermost object.
+        $start = strpos($trimmed, '{');
+        $end = strrpos($trimmed, '}');
+        if ($start !== false && $end !== false && $end > $start) {
+            $decoded = json_decode(substr($trimmed, $start, $end - $start + 1), true);
+            if ($this->isVerdictPayload($decoded)) {
+                /** @var array{verdict: mixed, reason?: mixed} $decoded */
+                return $decoded;
+            }
+        }
+
+        return null;
     }
 
     /**
      * @return array{0: AiVerdict, 1: string}
      */
-    private function parseVerdict(string $raw): array
+    private function verdictFromDecoded(array $decoded): array
     {
-        $decoded = json_decode($raw, true);
-
-        if (! is_array($decoded)) {
-            if (preg_match('/\{.*\}/s', $raw, $matches) === 1) {
-                $decoded = json_decode($matches[0], true);
-            }
-        }
-
-        if (! is_array($decoded)) {
-            return [AiVerdict::Inconclusive, 'Model response was not valid JSON.'];
-        }
-
         $verdict = AiVerdict::tryFrom(strtolower((string) ($decoded['verdict'] ?? '')))
             ?? AiVerdict::Inconclusive;
 
@@ -283,5 +390,10 @@ MESSAGE;
         }
 
         return [$verdict, $reason];
+    }
+
+    private function isVerdictPayload(mixed $decoded): bool
+    {
+        return is_array($decoded) && array_key_exists('verdict', $decoded);
     }
 }

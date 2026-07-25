@@ -4,8 +4,10 @@ namespace App\Services\Bedrock;
 
 use Aws\BedrockRuntime\BedrockRuntimeClient;
 use Aws\Exception\AwsException;
+use Aws\Result;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Throwable;
 
 class BedrockService
 {
@@ -99,19 +101,35 @@ class BedrockService
                 'status_code' => $e->getStatusCode(),
             ]);
 
+            $detail = $e->getAwsErrorMessage() ?: $e->getMessage();
+
             throw new RuntimeException(
-                "Failed to invoke Bedrock model [{$modelId}]: {$e->getAwsErrorMessage()}",
+                "Failed to invoke Bedrock model [{$modelId}]: {$detail}",
+                0,
+                $e,
+            );
+        } catch (Throwable $e) {
+            Log::error('submission.bedrock.request_failed', [
+                'model_id' => $modelId,
+                'region' => $region,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
+            throw new RuntimeException(
+                "Failed to invoke Bedrock model [{$modelId}]: {$e->getMessage()}",
                 0,
                 $e,
             );
         }
 
-        $text = $response['output']['message']['content'][0]['text'] ?? null;
+        $text = $this->extractText($response);
 
-        if (! is_string($text) || $text === '') {
+        if ($text === '') {
             Log::error('submission.bedrock.empty_response', [
                 'model_id' => $modelId,
                 'region' => $region,
+                'stop_reason' => $response['stopReason'] ?? null,
             ]);
 
             throw new RuntimeException("Bedrock model [{$modelId}] returned an empty response.");
@@ -121,8 +139,37 @@ class BedrockService
             'model_id' => $modelId,
             'region' => $region,
             'response_length' => mb_strlen($text),
+            'stop_reason' => $response['stopReason'] ?? null,
+            'max_tokens' => $inferenceConfig['maxTokens'] ?? null,
         ]);
 
         return $text;
+    }
+
+    /**
+     * @param  array<string, mixed>|Result  $response
+     */
+    private function extractText(array|Result $response): string
+    {
+        $payload = $response instanceof Result ? $response->toArray() : $response;
+        $blocks = $payload['output']['message']['content'] ?? [];
+
+        if (! is_array($blocks)) {
+            return '';
+        }
+
+        $parts = [];
+
+        foreach ($blocks as $block) {
+            if (! is_array($block)) {
+                continue;
+            }
+
+            if (isset($block['text']) && is_string($block['text']) && $block['text'] !== '') {
+                $parts[] = $block['text'];
+            }
+        }
+
+        return trim(implode("\n", $parts));
     }
 }

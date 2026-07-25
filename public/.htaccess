@@ -1,3 +1,19 @@
+# Allow ~800MB–1GB video uploads (must also match PHP/web-server limits).
+<IfModule mod_php.c>
+    php_value upload_max_filesize 1024M
+    php_value post_max_size 1100M
+    php_value memory_limit 1024M
+    php_value max_execution_time 1800
+    php_value max_input_time 1800
+</IfModule>
+<IfModule mod_php8.c>
+    php_value upload_max_filesize 1024M
+    php_value post_max_size 1100M
+    php_value memory_limit 1024M
+    php_value max_execution_time 1800
+    php_value max_input_time 1800
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes

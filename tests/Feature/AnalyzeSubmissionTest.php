@@ -199,6 +199,49 @@ it('stores new uploads on s3 when configured', function () {
     Storage::disk('s3')->assertExists($submission->disk_path);
 });
 
+it('repairs prose video replies into json verdicts', function () {
+    Storage::fake('s3');
+    Storage::disk('s3')->put('submissions/clip.mov', 'fake-mov-bytes');
+
+    config([
+        'filesystems.disks.s3.bucket' => 'portal-uploads',
+        'submissions.disk' => 's3',
+        'services.bedrock.model_id' => 'global.amazon.nova-2-lite-v1:0',
+    ]);
+
+    $submission = Submission::factory()->video()->create([
+        'original_filename' => 'video.mov',
+        'disk_path' => 'submissions/clip.mov',
+        'disk' => 's3',
+        'mime_type' => 'video/quicktime',
+        'status' => SubmissionStatus::Pending,
+    ]);
+
+    $prose = 'The video shows a bird diving into the ocean, then a school of fish and a whale breaching.';
+
+    $this->mock(BedrockService::class, function ($mock) use ($prose) {
+        $mock->shouldReceive('converseContent')
+            ->once()
+            ->andReturn($prose);
+
+        $mock->shouldReceive('converse')
+            ->once()
+            ->withArgs(function (string $message): bool {
+                return str_contains($message, 'Convert the following content review')
+                    && str_contains($message, 'bird diving');
+            })
+            ->andReturn('{"verdict":"accept","reason":"Nature video with birds, fish, and a whale."}');
+    });
+
+    $advice = app(AnalyzeSubmissionAction::class)->handle($submission);
+
+    expect($advice->status)->toBe(AdviceStatus::Completed)
+        ->and($advice->ai_verdict)->toBe(AiVerdict::Accept)
+        ->and($advice->ai_reason)->toBe('Nature video with birds, fish, and a whale.')
+        ->and($advice->ai_raw_response)->toContain('JSON repair')
+        ->and($advice->extraction_status->value)->toBe('s3_referenced');
+});
+
 it('records extraction failure when local stored file is missing', function () {
     Storage::fake('local');
 

@@ -9,22 +9,40 @@
 </head>
 <body class="min-h-screen bg-stone-100 text-stone-900 antialiased">
     <header class="border-b border-stone-200 bg-white">
-        <div class="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-            <a href="{{ route('submissions.create') }}" class="text-lg font-semibold tracking-tight text-stone-900">
+        <div class="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-6">
+            <a href="{{ route('submissions.create') }}" class="shrink-0 text-lg font-semibold tracking-tight text-stone-900">
                 Submission Portal
             </a>
-            <nav class="flex items-center gap-3 text-sm">
-                <a href="{{ route('submissions.create') }}" class="text-stone-600 hover:text-stone-900">Submit</a>
+
+            <nav class="flex flex-wrap items-center gap-x-1 gap-y-2 text-sm">
+                <a href="{{ route('submissions.create') }}"
+                    class="rounded-md px-3 py-2 text-stone-600 hover:bg-stone-100 hover:text-stone-900">Submit</a>
+
                 @auth
-                    <a href="{{ route('review.submissions.index') }}" class="text-stone-600 hover:text-stone-900">Review</a>
-                    <a href="{{ route('admin.ai.edit') }}" class="text-stone-600 hover:text-stone-900">AI settings</a>
-                    <a href="{{ route('admin.bedrock.ping') }}" class="text-stone-600 hover:text-stone-900">Bedrock ping</a>
+                    <a href="{{ route('review.submissions.index') }}"
+                        class="rounded-md px-3 py-2 text-stone-600 hover:bg-stone-100 hover:text-stone-900">Review</a>
+
+                    <span class="mx-1 hidden h-4 w-px bg-stone-200 sm:inline-block" aria-hidden="true"></span>
+
+                    <a href="{{ route('admin.ai.edit') }}"
+                        class="rounded-md px-3 py-2 text-stone-600 hover:bg-stone-100 hover:text-stone-900">AI settings</a>
+                    <a href="{{ route('admin.bedrock.ping') }}"
+                        class="rounded-md px-3 py-2 text-stone-600 hover:bg-stone-100 hover:text-stone-900">Bedrock ping</a>
+                    <a href="{{ route('admin.wipe.show') }}"
+                        class="rounded-md px-3 py-2 text-red-700 hover:bg-red-50 hover:text-red-900">Wipe</a>
+
+                    <span class="mx-1 hidden h-4 w-px bg-stone-200 sm:inline-block" aria-hidden="true"></span>
+
                     <form method="POST" action="{{ route('logout') }}">
                         @csrf
-                        <button type="submit" class="text-stone-600 hover:text-stone-900">Log out</button>
+                        <button type="submit"
+                            class="rounded-md px-3 py-2 text-stone-600 hover:bg-stone-100 hover:text-stone-900">
+                            Log out
+                        </button>
                     </form>
                 @else
-                    <a href="{{ route('login') }}" class="rounded-md bg-stone-900 px-3 py-1.5 text-white hover:bg-stone-700">Log in</a>
+                    <a href="{{ route('login') }}"
+                        class="rounded-md bg-stone-900 px-3 py-2 text-white hover:bg-stone-700">Log in</a>
                 @endauth
             </nav>
         </div>

@@ -16,6 +16,10 @@ class AppServiceProvider extends ServiceProvider
             $config = [
                 'version' => 'latest',
                 'region' => config('services.bedrock.region'),
+                'http' => [
+                    'timeout' => (int) config('services.bedrock.http_timeout', 600),
+                    'connect_timeout' => (int) config('services.bedrock.http_connect_timeout', 30),
+                ],
             ];
 
             $key = config('services.bedrock.key');

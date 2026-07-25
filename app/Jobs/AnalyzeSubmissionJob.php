@@ -13,6 +13,17 @@ class AnalyzeSubmissionJob implements ShouldQueue
 {
     use Queueable;
 
+    /**
+     * Seconds the worker may spend on this job (large videos need several minutes).
+     * Keep below DB queue retry_after.
+     */
+    public int $timeout = 660;
+
+    /**
+     * Do not retry forever if Bedrock times out — one retry is enough.
+     */
+    public int $tries = 2;
+
     public function __construct(public Submission $submission) {}
 
     public function handle(AnalyzeSubmissionAction $analyze): void

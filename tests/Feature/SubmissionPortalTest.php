@@ -21,6 +21,7 @@ it('shows the public submission form', function () {
 
 it('accepts a document submission as pending', function () {
     Storage::fake('local');
+    config(['submissions.disk' => 'local']);
 
     $file = UploadedFile::fake()->create('brief.pdf', 200, 'application/pdf');
 
@@ -45,6 +46,7 @@ it('accepts a document submission as pending', function () {
 
 it('accepts image, document, and video submissions', function (string $name, string $mime, SubmissionType $type) {
     Storage::fake('local');
+    config(['submissions.disk' => 'local']);
 
     $file = UploadedFile::fake()->create($name, 500, $mime);
 
@@ -65,4 +67,6 @@ it('accepts image, document, and video submissions', function (string $name, str
     'pptx' => ['deck.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', SubmissionType::Document],
     'mp4' => ['clip.mp4', 'video/mp4', SubmissionType::Video],
     'mkv' => ['movie.mkv', 'video/x-matroska', SubmissionType::Video],
+    'wmv' => ['clip.wmv', 'video/x-ms-asf', SubmissionType::Video],
+    'avi' => ['clip.avi', 'video/x-msvideo', SubmissionType::Video],
 ]);

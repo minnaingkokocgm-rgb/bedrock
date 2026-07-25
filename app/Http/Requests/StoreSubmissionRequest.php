@@ -21,6 +21,11 @@ class StoreSubmissionRequest extends FormRequest
      */
     public function rules(): array
     {
+        $maxDocumentKb = (int) config('submissions.max_kilobytes.document', 20 * 1024);
+        $maxImageKb = (int) config('submissions.max_kilobytes.image', 10 * 1024);
+        $maxVideoKb = (int) config('submissions.max_kilobytes.video', 1024 * 1024);
+        $absoluteMaxKb = max($maxDocumentKb, $maxImageKb, $maxVideoKb);
+
         return [
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
@@ -28,8 +33,12 @@ class StoreSubmissionRequest extends FormRequest
             'submitter_email' => ['required', 'email', 'max:255'],
             'file' => [
                 'required',
-                File::types(SubmissionType::allowedExtensions())->max(100 * 1024),
-                function (string $attribute, mixed $value, Closure $fail): void {
+                // Validate by extension (not MIME). Windows often reports .wmv as video/x-ms-asf,
+                // which fails File::types() even though .wmv is allowed.
+                File::default()
+                    ->extensions(SubmissionType::allowedExtensions())
+                    ->max($absoluteMaxKb),
+                function (string $attribute, mixed $value, Closure $fail) use ($maxDocumentKb, $maxImageKb, $maxVideoKb): void {
                     if (! $value instanceof UploadedFile) {
                         return;
                     }
@@ -43,9 +52,9 @@ class StoreSubmissionRequest extends FormRequest
                     }
 
                     $maxKilobytes = match ($type) {
-                        SubmissionType::Document => 20 * 1024,
-                        SubmissionType::Image => 10 * 1024,
-                        SubmissionType::Video => 100 * 1024,
+                        SubmissionType::Document => $maxDocumentKb,
+                        SubmissionType::Image => $maxImageKb,
+                        SubmissionType::Video => $maxVideoKb,
                     };
 
                     if (($value->getSize() ?: 0) > $maxKilobytes * 1024) {

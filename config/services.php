@@ -34,8 +34,14 @@ return [
         'token' => env('AWS_SESSION_TOKEN'),
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
         'model_id' => env('BEDROCK_MODEL_ID', 'amazon.nova-lite-v1:0'),
-        'max_tokens' => (int) env('BEDROCK_MAX_TOKENS', 512),
+        // Output generation limit for verdict JSON (plenty for reason text; model max is 65_534).
+        'max_tokens' => (int) env('BEDROCK_MAX_TOKENS', 4096),
         'temperature' => (float) env('BEDROCK_TEMPERATURE', 0.5),
+        // Soft cap on extracted text chars sent in the prompt (leave headroom for video/S3).
+        'content_char_limit' => (int) env('BEDROCK_CONTENT_CHAR_LIMIT', 500_000),
+        // Seconds to wait for Converse (large S3 videos can take several minutes).
+        'http_timeout' => (int) env('BEDROCK_HTTP_TIMEOUT', 600),
+        'http_connect_timeout' => (int) env('BEDROCK_HTTP_CONNECT_TIMEOUT', 30),
     ],
 
     'slack' => [

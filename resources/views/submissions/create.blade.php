@@ -55,7 +55,7 @@
                 <p class="mt-2 text-xs text-stone-500">
                     Images (jpg, png, gif, ai, psd, webp, svg, …) up to 10MB ·
                     Documents (pdf, docx, xlsx, pptx, csv, …) up to 20MB ·
-                    Videos (mp4, mov, avi, mkv, …) up to 100MB.
+                    Videos (mp4, mov, avi, mkv, …) up to 1024MB.
                 </p>
                 @error('file')
                     <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
