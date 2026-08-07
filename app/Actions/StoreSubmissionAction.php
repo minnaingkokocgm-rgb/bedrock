@@ -2,21 +2,58 @@
 
 namespace App\Actions;
 
+use App\Enums\SubmissionSource;
 use App\Enums\SubmissionStatus;
 use App\Enums\SubmissionType;
 use App\Jobs\AnalyzeSubmissionJob;
 use App\Models\Submission;
+use App\Support\S3Uri;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
+use Symfony\Component\Mime\MimeTypes;
 use Throwable;
 
 class StoreSubmissionAction
 {
     /**
-     * @param  array{title: string, description?: ?string, submitter_name: string, submitter_email: string, file: UploadedFile}  $data
+     * @param  array{
+     *     title: string,
+     *     description?: ?string,
+     *     submitter_name: string,
+     *     submitter_email: string,
+     *     source: SubmissionSource|string,
+     *     file?: UploadedFile|null,
+     *     s3_uri?: string|null
+     * }  $data
      */
     public function handle(array $data): Submission
+    {
+        $source = $data['source'] instanceof SubmissionSource
+            ? $data['source']
+            : SubmissionSource::from((string) $data['source']);
+
+        $submission = match ($source) {
+            SubmissionSource::Upload => $this->storeUpload($data),
+            SubmissionSource::S3Uri => $this->storeS3Uri($data),
+        };
+
+        AnalyzeSubmissionJob::dispatch($submission);
+
+        Log::info('submission.store.job_dispatched', [
+            'submission_id' => $submission->id,
+            'source' => $submission->source->value,
+            'queue_connection' => config('queue.default'),
+        ]);
+
+        return $submission;
+    }
+
+    /**
+     * @param  array{title: string, description?: ?string, submitter_name: string, submitter_email: string, file?: UploadedFile|null}  $data
+     */
+    private function storeUpload(array $data): Submission
     {
         /** @var UploadedFile $file */
         $file = $data['file'];
@@ -69,7 +106,8 @@ class StoreSubmissionAction
             'original_filename' => $file->getClientOriginalName(),
             'disk_path' => $path,
             'disk' => $disk,
-            'mime_type' => $mime,
+            'source' => SubmissionSource::Upload,
+            'mime_type' => $mime ?: 'application/octet-stream',
             'size' => $file->getSize() ?: 0,
             'type' => $type,
             'status' => SubmissionStatus::Pending,
@@ -77,6 +115,7 @@ class StoreSubmissionAction
 
         Log::info('submission.store.success', [
             'submission_id' => $submission->id,
+            'source' => SubmissionSource::Upload->value,
             'disk' => $disk,
             'disk_path' => $path,
             'bucket' => $disk === 's3' ? config('filesystems.disks.s3.bucket') : null,
@@ -87,11 +126,67 @@ class StoreSubmissionAction
                 : null,
         ]);
 
-        AnalyzeSubmissionJob::dispatch($submission);
+        return $submission;
+    }
 
-        Log::info('submission.store.job_dispatched', [
+    /**
+     * @param  array{title: string, description?: ?string, submitter_name: string, submitter_email: string, s3_uri?: string|null}  $data
+     */
+    private function storeS3Uri(array $data): Submission
+    {
+        $configuredBucket = (string) config('filesystems.disks.s3.bucket');
+
+        if ($configuredBucket === '') {
+            throw new InvalidArgumentException('AWS_BUCKET must be set to submit an S3 URI.');
+        }
+
+        $uri = S3Uri::parse((string) ($data['s3_uri'] ?? ''));
+
+        if ($uri->bucket !== $configuredBucket) {
+            throw new InvalidArgumentException("The S3 URI bucket must be \"{$configuredBucket}\".");
+        }
+
+        $type = SubmissionType::fromExtension($uri->extension());
+
+        if ($type === null) {
+            throw new InvalidArgumentException('Unsupported file type.');
+        }
+
+        $size = 0;
+
+        try {
+            $size = (int) Storage::disk('s3')->size($uri->key);
+        } catch (Throwable) {
+            $size = 0;
+        }
+
+        $mimeTypes = MimeTypes::getDefault()->getMimeTypes($uri->extension());
+        $mime = $mimeTypes[0] ?? 'application/octet-stream';
+
+        $submission = Submission::query()->create([
+            'title' => $data['title'],
+            'description' => $data['description'] ?? null,
+            'submitter_name' => $data['submitter_name'],
+            'submitter_email' => $data['submitter_email'],
+            'original_filename' => $uri->filename(),
+            'disk_path' => $uri->key,
+            'disk' => 's3',
+            'source' => SubmissionSource::S3Uri,
+            'mime_type' => $mime,
+            'size' => $size,
+            'type' => $type,
+            'status' => SubmissionStatus::Pending,
+        ]);
+
+        Log::info('submission.store.success', [
             'submission_id' => $submission->id,
-            'queue_connection' => config('queue.default'),
+            'source' => SubmissionSource::S3Uri->value,
+            'disk' => 's3',
+            'disk_path' => $uri->key,
+            'bucket' => $configuredBucket,
+            's3_uri' => $submission->s3Uri(),
+            'type' => $type->value,
+            'size' => $submission->size,
         ]);
 
         return $submission;

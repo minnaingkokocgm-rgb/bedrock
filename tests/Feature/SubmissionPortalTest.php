@@ -1,20 +1,25 @@
 <?php
 
+use App\Enums\SubmissionSource;
 use App\Enums\SubmissionStatus;
 use App\Enums\SubmissionType;
 use App\Models\Submission;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Queue::fake();
+    $this->user = User::factory()->create();
 });
 
-it('shows the public submission form', function () {
-    $this->get(route('submissions.create'))
+it('shows the submission form for authenticated users', function () {
+    $this->actingAs($this->user)
+        ->get(route('submissions.create'))
         ->assertSuccessful()
         ->assertSee('Submit a file');
 });
@@ -25,13 +30,15 @@ it('accepts a document submission as pending', function () {
 
     $file = UploadedFile::fake()->create('brief.pdf', 200, 'application/pdf');
 
-    $this->post(route('submissions.store'), [
-        'title' => 'Project brief',
-        'description' => 'Q3 outline',
-        'submitter_name' => 'Ada Lovelace',
-        'submitter_email' => 'ada@example.com',
-        'file' => $file,
-    ])->assertRedirect(route('submissions.thanks'));
+    $this->actingAs($this->user)
+        ->post(route('submissions.store'), [
+            'title' => 'Project brief',
+            'description' => 'Q3 outline',
+            'submitter_name' => 'Ada Lovelace',
+            'submitter_email' => 'ada@example.com',
+            'source' => 'upload',
+            'file' => $file,
+        ])->assertRedirect(route('submissions.thanks'));
 
     $submission = Submission::query()->first();
 
@@ -39,6 +46,7 @@ it('accepts a document submission as pending', function () {
         ->and($submission->title)->toBe('Project brief')
         ->and($submission->status)->toBe(SubmissionStatus::Pending)
         ->and($submission->type)->toBe(SubmissionType::Document)
+        ->and($submission->source)->toBe(SubmissionSource::Upload)
         ->and($submission->original_filename)->toBe('brief.pdf');
 
     Storage::disk('local')->assertExists($submission->disk_path);
@@ -50,12 +58,14 @@ it('accepts image, document, and video submissions', function (string $name, str
 
     $file = UploadedFile::fake()->create($name, 500, $mime);
 
-    $this->post(route('submissions.store'), [
-        'title' => 'Media upload',
-        'submitter_name' => 'Ada Lovelace',
-        'submitter_email' => 'ada@example.com',
-        'file' => $file,
-    ])->assertRedirect(route('submissions.thanks'));
+    $this->actingAs($this->user)
+        ->post(route('submissions.store'), [
+            'title' => 'Media upload',
+            'submitter_name' => 'Ada Lovelace',
+            'submitter_email' => 'ada@example.com',
+            'source' => 'upload',
+            'file' => $file,
+        ])->assertRedirect(route('submissions.thanks'));
 
     expect(Submission::query()->first()->type)->toBe($type);
 })->with([

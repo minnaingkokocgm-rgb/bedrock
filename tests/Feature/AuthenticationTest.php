@@ -1,8 +1,9 @@
 <?php
 
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 it('shows the login page', function () {
     $this->get(route('login'))
@@ -46,7 +47,7 @@ it('logs a reviewer out', function () {
 
     $this->actingAs($user)
         ->post(route('logout'))
-        ->assertRedirect(route('submissions.create'));
+        ->assertRedirect(route('login'));
 
     $this->assertGuest();
 });

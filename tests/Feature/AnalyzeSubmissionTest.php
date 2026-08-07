@@ -32,13 +32,16 @@ it('dispatches an analysis job when a submission is stored', function () {
     Storage::fake('local');
 
     $file = UploadedFile::fake()->create('brief.pdf', 200, 'application/pdf');
+    $user = User::factory()->create();
 
-    $this->post(route('submissions.store'), [
-        'title' => 'Project brief',
-        'submitter_name' => 'Ada Lovelace',
-        'submitter_email' => 'ada@example.com',
-        'file' => $file,
-    ])->assertRedirect(route('submissions.thanks'));
+    $this->actingAs($user)
+        ->post(route('submissions.store'), [
+            'title' => 'Project brief',
+            'submitter_name' => 'Ada Lovelace',
+            'submitter_email' => 'ada@example.com',
+            'source' => 'upload',
+            'file' => $file,
+        ])->assertRedirect(route('submissions.thanks'));
 
     Queue::assertPushed(AnalyzeSubmissionJob::class);
     expect(Submission::query()->first()->status)->toBe(SubmissionStatus::Pending);
@@ -185,13 +188,16 @@ it('stores new uploads on s3 when configured', function () {
     ]);
 
     $file = UploadedFile::fake()->create('notes.txt', 20, 'text/plain');
+    $user = User::factory()->create();
 
-    $this->post(route('submissions.store'), [
-        'title' => 'Notes',
-        'submitter_name' => 'Ada Lovelace',
-        'submitter_email' => 'ada@example.com',
-        'file' => $file,
-    ])->assertRedirect(route('submissions.thanks'));
+    $this->actingAs($user)
+        ->post(route('submissions.store'), [
+            'title' => 'Notes',
+            'submitter_name' => 'Ada Lovelace',
+            'submitter_email' => 'ada@example.com',
+            'source' => 'upload',
+            'file' => $file,
+        ])->assertRedirect(route('submissions.thanks'));
 
     $submission = Submission::query()->first();
 

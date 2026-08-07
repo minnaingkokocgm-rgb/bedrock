@@ -62,6 +62,17 @@ class WipeSubmissionsAction
      */
     private function deleteStoredFile(Submission $submission): string
     {
+        if ($submission->source !== null && ! $submission->source->ownsStoredFile()) {
+            Log::info('submissions.wipe.file_skipped_external_uri', [
+                'submission_id' => $submission->id,
+                'disk' => $submission->disk,
+                'disk_path' => $submission->disk_path,
+                's3_uri' => $submission->s3Uri(),
+            ]);
+
+            return 'missing';
+        }
+
         if (! filled($submission->disk) || ! filled($submission->disk_path)) {
             return 'missing';
         }

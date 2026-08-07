@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\SubmissionSource;
 use App\Enums\SubmissionStatus;
 use App\Enums\SubmissionType;
 use App\Models\Submission;
@@ -26,6 +27,7 @@ class SubmissionFactory extends Factory
             'original_filename' => 'example.pdf',
             'disk_path' => 'submissions/example.pdf',
             'disk' => 'local',
+            'source' => SubmissionSource::Upload,
             'mime_type' => 'application/pdf',
             'size' => fake()->numberBetween(1_000, 500_000),
             'type' => SubmissionType::Document,
@@ -53,6 +55,14 @@ class SubmissionFactory extends Factory
             'disk_path' => 'submissions/clip.mp4',
             'mime_type' => 'video/mp4',
             'type' => SubmissionType::Video,
+        ]);
+    }
+
+    public function fromS3Uri(): static
+    {
+        return $this->state(fn (): array => [
+            'disk' => 's3',
+            'source' => SubmissionSource::S3Uri,
         ]);
     }
 

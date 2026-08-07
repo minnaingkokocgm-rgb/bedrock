@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\SubmissionSource;
 use App\Enums\SubmissionStatus;
 use App\Enums\SubmissionType;
 use Database\Factories\SubmissionFactory;
@@ -20,6 +21,7 @@ use Illuminate\Support\Facades\Storage;
     'original_filename',
     'disk_path',
     'disk',
+    'source',
     'mime_type',
     'size',
     'type',
@@ -41,6 +43,7 @@ class Submission extends Model
         return [
             'type' => SubmissionType::class,
             'status' => SubmissionStatus::class,
+            'source' => SubmissionSource::class,
             'size' => 'integer',
             'reviewed_at' => 'datetime',
         ];

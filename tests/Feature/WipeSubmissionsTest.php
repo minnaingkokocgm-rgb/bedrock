@@ -100,3 +100,26 @@ it('still removes db rows when a stored file is already missing', function () {
 
     expect(Submission::query()->count())->toBe(0);
 });
+
+it('wipes s3 uri submission records without deleting the referenced object', function () {
+    Storage::fake('s3');
+    config(['filesystems.disks.s3.bucket' => 'portal-uploads']);
+
+    Storage::disk('s3')->put('existing/shared.pdf', 'shared-bytes');
+
+    Submission::factory()->fromS3Uri()->create([
+        'disk_path' => 'existing/shared.pdf',
+        'original_filename' => 'shared.pdf',
+    ]);
+
+    $reviewer = User::factory()->create();
+
+    $this->actingAs($reviewer)
+        ->delete(route('admin.wipe.destroy'), [
+            'confirmation' => 'WIPE',
+        ])
+        ->assertRedirect(route('admin.wipe.show'));
+
+    expect(Submission::query()->count())->toBe(0);
+    Storage::disk('s3')->assertExists('existing/shared.pdf');
+});
