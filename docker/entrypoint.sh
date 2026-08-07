@@ -26,6 +26,26 @@ run_artisan() {
     fi
 }
 
+ensure_sqlite_database() {
+    if [ "${DB_CONNECTION:-}" != "sqlite" ]; then
+        return 0
+    fi
+
+    db_path="${DB_DATABASE:-/var/www/html/database/database.sqlite}"
+
+    mkdir -p "$(dirname "$db_path")"
+
+    if [ ! -f "$db_path" ]; then
+        echo "Creating SQLite database at ${db_path}..."
+        touch "$db_path"
+    fi
+
+    if [ "$(id -u)" = "0" ]; then
+        chown www-data:www-data "$db_path" || true
+        chmod 664 "$db_path" || true
+    fi
+}
+
 wait_for_database() {
     if [ -z "${DB_HOST:-}" ] || [ "${DB_CONNECTION:-}" = "sqlite" ]; then
         return 0
@@ -64,6 +84,7 @@ wait_for_database() {
 
 role="${CONTAINER_ROLE:-app}"
 
+ensure_sqlite_database
 wait_for_database
 
 if [ "$role" = "app" ] && [ "${RUN_MIGRATIONS:-false}" = "true" ]; then

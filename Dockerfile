@@ -50,6 +50,7 @@ RUN apt-get update \
         libfreetype6-dev \
         libicu-dev \
         libonig-dev \
+        libsqlite3-dev \
         $PHPIZE_DEPS \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" \
@@ -61,6 +62,7 @@ RUN apt-get update \
         opcache \
         pcntl \
         pdo_mysql \
+        pdo_sqlite \
         zip \
     && apt-get purge -y --auto-remove $PHPIZE_DEPS \
     && rm -rf /var/lib/apt/lists/*
